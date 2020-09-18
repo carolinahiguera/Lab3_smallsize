@@ -8,53 +8,42 @@ import sim_sender as rtx
 import numpy as np
 
 # PARAMETERS
-# Default External Parameters
-SIM_FLAG = True    # True=simulation, False=Real
-NUM_CAMERAS = 4
-DRAW_SCALE = 0.10
+SIM_FLAG = True    #Dejar siempre en True
+NUM_CAMERAS = 4	   #En el simulador se tienen 4 camaras
 
-MAX_ROBOTS = 1
-TEAM = 0 # Blue=0,  Yellow=1
+MAX_ROBOTS = 1     #cantidad de robots por equipo
+TEAM = 0 # Blue=0,  Yellow=1    #dejar siempre 0
 
 
 # Robot movements
-robot_move_abs = np.zeros([2, MAX_ROBOTS]) # Absolute to court
-robot_move_rel = np.zeros([3, MAX_ROBOTS]) # Absolute to robot
+robot_move_abs = np.zeros([2, MAX_ROBOTS]) # Vx y Vy en marco global
+robot_move_rel = np.zeros([3, MAX_ROBOTS]) # Vx, Vy y theta en marco local del robot
+
 # Ball
-ball = (0, 0)
-ball_ant = (0, 0)
+ball = (0, 0)  #coordenada actual (x,y) en marco global de la bola
+ball_ant = (0, 0) #coordenada anterior (x,y) en marco global de la bola
 
 
+# ------------------ NO MODIFICAR ------------------------------
+#lanzar proceso para comunicarse con grSim
 pkgManager = subprocess.Popen(["pkgManager/pkgManager", str(NUM_CAMERAS)])
 time.sleep(0.3)
 
-# Initialization
+# inicializar comunicacion
 rtx.init()
+# inicializar el objeto que el que se recibe info de las camaras
 cam.init(MAX_ROBOTS)
 
-
-alphasDeg = [45, 45+90, 45+2*90, 45+3*90]
-# alphasDeg = [40, 180-40, 180+40, 360-40]
-# alphasDeg = [50, 180-50, 180+50, 360-50]
-alphas = np.radians(alphasDeg)
-# D matrix
-Dmat = np.array( [ [-np.sin(alphas[0]), np.cos(alphas[0]), 1],
-                   [-np.sin(alphas[1]), np.cos(alphas[1]), 1],
-                   [-np.sin(alphas[2]), np.cos(alphas[2]), 1],
-                   [-np.sin(alphas[3]), np.cos(alphas[3]), 1] ] )
-
-
-# Receiving geometry data
-print('Waiting for geometry data...')
+print('Waiting for geometry data from grSim...')
 done = False
 while not done:
-    print('Waiting for geometry data...')
+    print('Waiting for geometry data from grSim...')
     cam.read()
     done = cam.ssl_wrapper.HasField('geometry')
-# print('Geometry data received.')
-diagCourt = math.sqrt(cam.getGeometry()[0]**2+cam.getGeometry()[1]**2)
+print('Done')
 
-
+# Filtro de Kalman para la bola
+# actualiza la posicion de la bola en el marco global
 def ballFiltering():
     global ball, ball_ant
     ball = ball_ant
@@ -66,39 +55,32 @@ def ballFiltering():
                 ball = ball_tmp
                 dist = np.sqrt((ball_ant[0] - ball_tmp[0]) ** 2 + (ball_ant[1] - ball_tmp[1]) ** 2)
         ball_ant = ball
+# ------------------------------------
 
+# ------------- TU CODIGO AQUI -------------------------
+
+# establecer un perfil de velocidad en marco global
 robot_move_abs[0] = 1.0
 robot_move_abs[1] = 0.0
 
+# aplicar el perfil por n steps
 for i in range(500):
-    # Camera reading
+    # leer las camaras
     cam.read()
+    # convertir velocidad en marco global a marco local
     robot_move_rel[0:2] = rotateAxisMat(robot_move_abs[0], robot_move_abs[1], cam.robotsInfo[TEAM, :, 2])
-    # BALL FILTERING
+    # actualizar posicion de la bola
     ballFiltering()
 
-
-    # motVel = np.matmul(Dmat, [robot_move_rel[0], robot_move_rel[1], robot_move_rel[2] ] )
-    # motVel[0] = motVel[0] if motVel[0] <= 1.0 else 1.0
-    # motVel[1] = motVel[1] if motVel[1] <= 1.0 else 1.0
-    # motVel[2] = motVel[2] if motVel[2] <= 1.0 else 1.0
-    # motVel[3] = motVel[3] if motVel[3] <= 1.0 else 1.0
-
-    # # Create movement package
-    # rtx.package_init(MAX_ROBOTS)
-    # rtx.w0 = motVel[0] 
-    # rtx.w1 = motVel[1] 
-    # rtx.w2 = motVel[2] 
-    # rtx.w3 = motVel[3] 
-    # rtx.send_wheelsVel()
-
-    # Create movement package
+    # crear paquete de velocidad del robot (en marco local) para enviar al simulador
     rtx.package_init(MAX_ROBOTS)
-    rtx.vx = robot_move_rel[0]
-    rtx.vy = robot_move_rel[1]
-    rtx.vw = robot_move_rel[2]
+    rtx.vx = robot_move_rel[0] #vel lineal en x
+    rtx.vy = robot_move_rel[1] #vel lineal en y
+    rtx.vw = robot_move_rel[2] #vel angular
+    # enviar el paquete
     rtx.send()
 
+# detener el robot
 robot_move_rel[0] = 0.0
 robot_move_rel[1] = 0.0
 robot_move_rel[2] = 0.0
@@ -108,7 +90,11 @@ rtx.vy = robot_move_rel[1]
 rtx.vw = robot_move_rel[2]
 rtx.send()
 
-# cam.close()
-# os.killpg(os.getpgid(pkgManager.pid), signal.SIGTERM)
+# ------------- HASTA AQUI ----------------------
+
+#  NO MODIFICAR
+cam.close()
+os.killpg(os.getpgid(pkgManager.pid), signal.SIGTERM)
+#--------------------
 
 
